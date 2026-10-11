@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
+import AuthGate from "@/components/AuthGate";
 import {
   Product,
   loadProducts,
@@ -10,7 +11,15 @@ import {
   makeKeywords,
 } from "@/lib/products";
 
-export default function MenuManager() {
+export default function MenuPage() {
+  return (
+    <AuthGate roles={["owner", "staff"]}>
+      <MenuManager />
+    </AuthGate>
+  );
+}
+
+function MenuManager() {
   const [products, setProducts] = useState<Product[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState({

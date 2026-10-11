@@ -1,8 +1,10 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import Link from "next/link";
 import { Product, loadProducts } from "@/lib/products";
+import { supabase } from "@/lib/supabase";
+import AuthGate from "@/components/AuthGate";
+import NavLinks from "@/components/NavLinks";
 import {
   OrderItem,
   parseSpokenOrder,
@@ -10,7 +12,15 @@ import {
   calculateTotal,
 } from "@/lib/parseOrder";
 
-export default function VoicePOS() {
+export default function Page() {
+  return (
+    <AuthGate roles={["owner", "staff"]}>
+      <VoicePOS />
+    </AuthGate>
+  );
+}
+
+function VoicePOS() {
   const [products, setProducts] = useState<Product[]>([]);
   const [order, setOrder] = useState<OrderItem[]>([]);
   const [isListening, setIsListening] = useState(false);
@@ -20,7 +30,7 @@ export default function VoicePOS() {
   const [error, setError] = useState<string | null>(null);
   const [lastAdded, setLastAdded] = useState<string | null>(null);
   const [isSending, setIsSending] = useState(false);
-  const [orderCounter, setOrderCounter] = useState(1000);
+  const [lastOrder, setLastOrder] = useState<{ id: string; no: number; total: number; paid?: string } | null>(null);
   const [isSupported, setIsSupported] = useState(false); // start false to avoid hydration mismatch
   const [priceTab, setPriceTab] = useState<string>("all");
 
@@ -203,10 +213,26 @@ export default function VoicePOS() {
     }
 
     setIsSending(true);
-    setStatus("Sending order to Telegram...");
+    setStatus("Saving order...");
 
-    const newOrderNumber = orderCounter + 1;
-    setOrderCounter(newOrderNumber);
+    // 1) Save to the database first – the order is never lost even if Telegram fails
+    const { data: saved, error: saveErr } = await supabase.rpc("place_order", {
+      p_items: order.map((i) => ({
+        product_id: i.product.id,
+        name_en: i.product.nameEn,
+        name_gu: i.product.nameGu,
+        category: i.product.id.includes("pizza") ? "pizza" : "sandwich",
+        price: i.product.price,
+        qty: i.quantity,
+      })),
+    });
+    if (saveErr || !saved) {
+      setStatus(`❌ Not saved: ${saveErr?.message ?? "unknown error"}`);
+      setIsSending(false);
+      return;
+    }
+    const newOrderNumber: number = saved.order_no;
+    setLastOrder({ id: saved.order_id, no: newOrderNumber, total: saved.total });
 
     const now = new Date();
     const timeStr = now.toLocaleTimeString("gu-IN", {
@@ -215,7 +241,7 @@ export default function VoicePOS() {
       hour12: true,
     });
 
-    // Build the Telegram message in Gujarati (HTML format)
+    // 2) Telegram message in Gujarati (HTML format)
     const itemsText = order
       .map(
         (i) =>
@@ -244,30 +270,28 @@ ${itemsText}
       });
 
       const data = await res.json();
-
-      if (data.success) {
-        setStatus(`✅ Order #${newOrderNumber} sent to Telegram!`);
-        // Clear order after successful send
-        setOrder([]);
-        setTranscript("");
-        setLastAdded(null);
-      } else {
-        setStatus(`❌ Failed: ${data.error}`);
-        // Still show the order details so user can note it
-        alert(
-          `Could not send to Telegram.\n\nOrder #${newOrderNumber}\n\n${order
-            .map(
-              (i) =>
-                `${i.quantity} × ${i.product.nameEn} = ₹${i.product.price * i.quantity}`
-            )
-            .join("\n")}\n\nTotal: ₹${total}\n\nError: ${data.error}`
-        );
-      }
+      setStatus(
+        data.success
+          ? `✅ Order #${newOrderNumber} saved & sent to Telegram`
+          : `✅ Order #${newOrderNumber} saved (Telegram: ${data.error})`
+      );
     } catch (err: any) {
-      setStatus(`❌ Network error: ${err.message}`);
-      alert("Failed to send order. Check your internet connection.");
+      setStatus(`✅ Order #${newOrderNumber} saved (Telegram offline)`);
     } finally {
+      setOrder([]);
+      setTranscript("");
+      setLastAdded(null);
       setIsSending(false);
+    }
+  };
+
+  const markPaid = async (method: "cash" | "upi") => {
+    if (!lastOrder) return;
+    const { error } = await supabase.rpc("set_payment", { p_order: lastOrder.id, p_method: method });
+    if (error) setStatus(`❌ ${error.message}`);
+    else {
+      setStatus(`💰 Order #${lastOrder.no} paid by ${method.toUpperCase()}`);
+      setLastOrder({ ...lastOrder, paid: method });
     }
   };
 
@@ -311,12 +335,7 @@ ${itemsText}
           <p className="text-xs text-slate-400">Krishna Sandwich - Pizza</p>
         </div>
         <div className="flex items-center gap-3">
-          <Link
-            href="/menu"
-            className="text-xs bg-slate-700 hover:bg-slate-600 px-3 py-1.5 rounded-lg"
-          >
-            Menu
-          </Link>
+          <NavLinks />
           <div className="text-right">
             <div className="text-2xl font-bold text-emerald-400">₹{total}</div>
             <div className="text-xs text-slate-400">Total</div>
@@ -327,6 +346,25 @@ ${itemsText}
       <main className="flex-1 flex flex-col md:flex-row max-w-6xl mx-auto w-full min-h-0">
         {/* Left: Voice + Products */}
         <section className="flex-1 p-3 flex flex-col gap-3 min-h-0 overflow-hidden">
+          {/* Just-saved order → record how it was paid */}
+          {lastOrder && (
+            <div className="bg-slate-800 rounded-xl p-3 border border-emerald-700 flex items-center gap-2 shrink-0">
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-semibold">Order #{lastOrder.no} · ₹{lastOrder.total}</div>
+                <div className="text-xs text-slate-400">
+                  {lastOrder.paid ? `Paid by ${lastOrder.paid.toUpperCase()} ✓` : "Mark payment (or do it later from Orders)"}
+                </div>
+              </div>
+              {!lastOrder.paid && (
+                <>
+                  <button onClick={() => markPaid("cash")} className="bg-emerald-600 hover:bg-emerald-500 text-sm font-semibold px-3 py-2 rounded-lg">💵 Cash</button>
+                  <button onClick={() => markPaid("upi")} className="bg-indigo-600 hover:bg-indigo-500 text-sm font-semibold px-3 py-2 rounded-lg">📱 UPI</button>
+                </>
+              )}
+              <button onClick={() => setLastOrder(null)} className="text-slate-500 hover:text-slate-300 px-1">✕</button>
+            </div>
+          )}
+
           {/* Mic Control - compact */}
           <div className="bg-slate-800 rounded-xl p-3 flex items-center gap-4 border border-slate-700 shrink-0">
             <button
