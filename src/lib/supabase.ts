@@ -2,8 +2,8 @@ import { createClient } from "@supabase/supabase-js";
 
 // Placeholders keep `next build` working before you've added your keys.
 export const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL || "http://localhost:54321",
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "public-anon-key-placeholder"
+  process.env.NEXT_PUBLIC_SUPABASE_URL || "https://qbpqnuzspzydczfwpnzi.supabase.co",
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "sb_publishable_YggC_QTHqlEdqwmQuuw-KA_v2fjqUDT"
 );
 
 /** Today's date (YYYY-MM-DD) in India time – matches the database's order_date. */
