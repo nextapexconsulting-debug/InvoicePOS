@@ -144,6 +144,12 @@ function MenuManager() {
       </header>
 
       <main className="max-w-3xl mx-auto p-4 space-y-6">
+        <Link
+          href="/menu/import"
+          className="flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 rounded-xl py-3 font-semibold"
+        >
+          📷 Upload menu photo (add or replace all items)
+        </Link>
         {message && (
           <div className="bg-emerald-900/50 border border-emerald-600 text-emerald-300 px-4 py-2 rounded-lg text-sm">
             {message}

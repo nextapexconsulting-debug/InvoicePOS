@@ -106,6 +106,7 @@ create table if not exists expenses (
   category     text not null,                  -- free text (Vegetables, Tea, Salary, Misc, anything)
   note         text,
   amount       numeric(10,2) not null check (amount > 0),
+  spread_days  int not null default 1 check (spread_days between 1 and 366),  -- charge over N days in profit reports
   source       text not null default 'manual' check (source in ('manual','stock_in')),
   stock_in_id  uuid unique references stock_in(id) on delete cascade,
   created_by   uuid references auth.users(id),
@@ -529,8 +530,11 @@ language sql stable as $$
   i as (select o.order_date as day, sum(oi.qty) items
         from order_items oi join orders o on o.id = oi.order_id
         where o.shop_id = p_shop and o.status = 'active' and o.order_date between p_from and p_to group by 1),
-  e as (select expense_date as day, sum(amount) amt
-        from expenses where shop_id = p_shop and expense_date between p_from and p_to group by 1)
+  -- each expense is divided equally over its spread_days, starting on its date
+  e as (select d.day, round(sum(x.amount / x.spread_days), 2) amt
+        from d join expenses x
+          on x.shop_id = p_shop and d.day >= x.expense_date and d.day < x.expense_date + x.spread_days
+        group by d.day)
   select d.day, coalesce(o.n,0), coalesce(i.items,0)::bigint, coalesce(o.sales,0), coalesce(o.cash,0),
          coalesce(o.upi,0), coalesce(o.unpaid,0), coalesce(e.amt,0), coalesce(o.sales,0) - coalesce(e.amt,0)
     from d left join o on o.day = d.day left join i on i.day = d.day left join e on e.day = d.day
